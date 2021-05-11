@@ -1,8 +1,8 @@
 import asyncio
-import message
 import websockets
-from message import MessageType
-from user import User
+from . import message
+from .message import MessageType
+from .user import User
 
 from typing import Any
 from websockets.legacy.protocol import WebSocketCommonProtocol

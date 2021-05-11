@@ -1,7 +1,7 @@
 import json
 from typing import Any
-import message
-from message import MessageType
+from . import message
+from .message import MessageType
 from websockets.legacy.protocol import WebSocketCommonProtocol
 
 class User:
