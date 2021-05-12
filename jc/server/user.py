@@ -22,6 +22,7 @@ class User:
       try:
         obj = message.parse_message(msg)
         if obj['type'] == MessageType.TEXT:
+          self.org.log_message(self, obj['text'])
           await self.server.publish(self.org, message.text_message(self.name, obj['text']))
       except InvalidMessageError:
         pass

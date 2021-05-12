@@ -46,7 +46,7 @@ class Organization:
     self.users.remove(user)
   
   def log_message(self, user: User, message: str): 
-    assert user.org == self.id
+    assert user.org == self
     assert user.name is not None
     self.logger.log_message(user, message)
 

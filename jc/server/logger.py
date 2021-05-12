@@ -6,7 +6,7 @@ from asyncio.tasks import Task
 import aiomysql
 import aiofiles
 import os
-from datetime import date, datetime
+from datetime import datetime
 from jc.server.user import User
 
 from typing import List
@@ -14,9 +14,9 @@ from typing import List
 
 class LoggerProtocol:
   def __init__(self, id: str):
-    today = date.today()
+    time = datetime.now()
     self.id = id
-    self.name = f'{today.strftime("%Y%m%d")}_{id}'
+    self.name = f'{time.strftime("%Y%m%d%H%M%S")}_{id}'
 
   @staticmethod
   async def create(id: str) -> LoggerProtocol:
@@ -25,11 +25,14 @@ class LoggerProtocol:
   async def close(self):
     pass
 
-  async def log(self, strings: List[str]):
+  async def log(self, _: List[str]):
     pass
 
 
 class StdoutLogger(LoggerProtocol):
+  async def create(id: str):
+    return StdoutLogger(id)
+
   async def log(self, strings: List[str]):
     for string in strings:
       print(string)
@@ -38,7 +41,7 @@ class FileLogger(LoggerProtocol):
   @staticmethod
   async def create(id: str):
     self = FileLogger(id)
-    self.file = await aiofiles.open(self.name, 'w')
+    self.file = await aiofiles.open(self.name + '.log', 'w')
     return self
 
   async def close(self):
@@ -46,7 +49,7 @@ class FileLogger(LoggerProtocol):
     self.file = None
 
   async def log(self, strings: List[str]):
-    await self.file.writelines(strings)
+    await self.file.writelines([f'{line}\n' for line in strings])
 
 class MysqlLogger(LoggerProtocol):
   @staticmethod
@@ -79,8 +82,9 @@ class MysqlLogger(LoggerProtocol):
     await self.cur.close()
     self.conn.close()
 
-  async def log(self, strings: List[str]):
-    print(f'[not implemented] {strings}')
+  async def log(self, _: List[str]):
+    # print(f'[not implemented] {strings}')
+    pass
 
 #
 
@@ -90,18 +94,26 @@ class Logger:
     self.loggers: List[LoggerProtocol]
     self.queue: List[str]
     self.lock: asyncio.Lock
+    self.event: asyncio.Event
     self.task: Task
   
   @staticmethod
   async def create(org_id: str) -> Logger:
     self = Logger()
     self.org_id = org_id
-    self.loggers = await asyncio.wait([
-      logger.create(org_id) for logger in [StdoutLogger, FileLogger, MysqlLogger]
+    
+    results = await asyncio.wait([
+      StdoutLogger.create(org_id),
+      FileLogger.create(org_id),
+      MysqlLogger.create(org_id),
     ])
+    self.loggers = [res.result() for res in results[0]]
     self.queue = []
     self.lock = asyncio.Lock()
+    self.event = asyncio.Event()
     self.task = asyncio.get_event_loop().create_task(self._writer_task())
+
+
     return self
   
   async def close(self):
@@ -114,23 +126,24 @@ class Logger:
   # batch writes
   async def _writer_task(self):
     while True:
-      await asyncio.sleep(0.5)
-      if len(self.queue) == 0:
-        continue
+      await self.event.wait()
+      self.event.clear()
+      await asyncio.sleep(1)
       
-      self.lock.acquire()
+      await self.lock.acquire()
       queue = self.queue.copy()
       self.queue = []
       self.lock.release()
-
+      # log the message
       await asyncio.wait([l.log(queue) for l in self.loggers])
   
   def _log(self, type: str, msg: str):
     time = datetime.now()
-    log = f'[{type}] {time.strftime("%Y-%m-%d")} | {msg}'
-    self.lock.acquire()
+    log = f'[{type}] {time.strftime("%Y-%m-%d %H:%M:%S")} | {msg}'
+    while self.lock.locked():
+      continue
     self.queue += [log]
-    self.lock.release()
+    self.event.set()
   
   #
 

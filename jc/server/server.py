@@ -57,8 +57,10 @@ class Server:
 
       try:
         await self.do_org_setup(org_id)
-      except:
-        return (HTTPStatus(500), {}, bytes())
+      finally:
+        pass
+      # except:
+      #   return (HTTPStatus(500), {}, bytes())
       return (HTTPStatus(201), {}, bytes())
     return None
 
@@ -88,6 +90,7 @@ class Server:
     org = await Organization.create(org_id)
     org.add_task(lambda org : self.update_viewer_count(org))
     self.orgs[org_id] = org
+    print(f'done org setup')
 
   # performs user set-up
   async def do_user_setup(self, ws: WebsocketProtocol, org: Organization) -> User:
@@ -112,8 +115,11 @@ class Server:
           user.email = setup['email']
           print('user joined chat')
           break
+      org.log_status(f'{setup["name"]} joined the chat')  
       return user
     except ConnectionClosedError:
+      if user.name:
+        org.log_status(f'{user.name} left the chat')
       org.remove_user(user)
 
   # updates the viewer count at a fixed rate
