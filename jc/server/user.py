@@ -1,7 +1,8 @@
 import json
+from jc.server import message
+from jc.server.message import MessageType
+
 from typing import Any
-from . import message
-from .message import MessageType
 from websockets.legacy.protocol import WebSocketCommonProtocol
 
 class User:
@@ -16,13 +17,13 @@ class User:
     await self.conn.send(msg)
 
   async def listen(self):
-    msg = await self.conn.recv()
-    try:
-      obj = message.parse_message(msg)
-      if obj['type'] == MessageType.TEXT:
-        await self.server.publish(message.text_message(self.name, obj['text']))
-      else:
-        print(f'invalid message from {self.email}')
-    except:
-      pass
+    async for msg in self.conn:
+      try:
+        obj = message.parse_message(msg)
+        if obj['type'] == MessageType.TEXT:
+          await self.server.publish(message.text_message(self.name, obj['text']))
+        else:
+          print(f'invalid message from {self.email}')
+      except:
+        pass
 

@@ -1,11 +1,13 @@
 import asyncio
 import websockets
-from . import message
-from .message import MessageType
-from .user import User
+from websockets.legacy import protocol
+from jc.server import message
+from jc.server.message import MessageType
+from jc.server.user import User
 
 from typing import Any
-from websockets.legacy.protocol import WebSocketCommonProtocol
+
+WebsocketProtocol = protocol.WebSocketCommonProtocol
 
 
 class Server:
@@ -34,7 +36,7 @@ class Server:
 
   #
   
-  async def handle_setup(self, ws: WebSocketCommonProtocol) -> User:
+  async def handle_setup(self, ws: WebsocketProtocol) -> User:
     # after connecting the first message from the client should
     # be a 'setup' message containing information about the user
     # connecting.
@@ -45,16 +47,14 @@ class Server:
     return user
 
 
-  async def handle_connection(self, ws: WebSocketCommonProtocol, path: str):
+  async def handle_connection(self, ws: WebsocketProtocol, path: str):
     try:
       print('connection opened')
       user = await self.handle_setup(ws)
       self.conn_event.set()
       await user.send(message.viewers_message(len(self.users)))
       await user.send(message.emotes_message(self.emotes))
-      
-      while True:
-        await user.listen()
+      await user.listen()
     finally:
       print('connection closed')
       self.users.remove(user)
@@ -62,9 +62,9 @@ class Server:
   # updates the viewer count at a fixed rate
   async def update_viewer_count(self):
     while True:
-      await self.conn_event.wait()
-      self.conn_event.clear()
+      if len(self.users) == 0:
+        await self.conn_event.wait()
+        self.conn_event.clear()
       await asyncio.sleep(self.UPDATE_TIMEOUT)
-      if len(self.users) > 0:
-        await self.publish(message.viewers_message(len(self.users)))
+      await self.publish(message.viewers_message(len(self.users)))
       
