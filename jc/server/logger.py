@@ -41,7 +41,10 @@ class FileLogger(LoggerProtocol):
   @staticmethod
   async def create(id: str):
     self = FileLogger(id)
-    self.file = await aiofiles.open(self.name + '.log', 'w')
+
+    logs_dir = os.getenv('LOGS_DIR', './')
+    path = os.path.join(logs_dir, self.name + '.log');
+    self.file = await aiofiles.open(path, 'w')
     return self
 
   async def close(self):

@@ -1,11 +1,13 @@
 import asyncio
 import re
+from ssl import SSLContext
 import websockets
 import functools
 from http import HTTPStatus
 from websockets.datastructures import Headers
 from websockets.legacy.server import HTTPResponse
 from websockets.exceptions import ConnectionClosedError
+
 from jc.server import message
 from jc.server.organization import Organization
 from jc.server.protocol import WebsocketProtocol
@@ -16,11 +18,12 @@ from typing import Any, Dict, Optional
 class Server:
   UPDATE_TIMEOUT = 5
 
-  def __init__(self, host: str, port: int):
+  def __init__(self, host: str, port: int, ssl: SSLContext = None):
     self.host = host
     self.port = port
     self.conn_event = asyncio.Event()
     self.orgs: Dict[str, Organization] = {}
+    self.ssl_ctx = ssl
 
   def serve(self) -> Any:
     def handle_req_wrapper(path, headers):
@@ -32,7 +35,8 @@ class Server:
     return websockets.serve(
       handle_conn_wrapper, 
       self.host, 
-      self.port, 
+      self.port,
+      ssl=self.ssl_ctx, 
       create_protocol=functools.partial(WebsocketProtocol, handle_req_wrapper)
     )
 
@@ -90,6 +94,7 @@ class Server:
     org = await Organization.create(org_id)
     org.add_task(lambda org : self.update_viewer_count(org))
     self.orgs[org_id] = org
+
     print(f'done org setup')
 
   # performs user set-up
