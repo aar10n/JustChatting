@@ -1,19 +1,25 @@
+from __future__ import annotations
+
 import asyncio
-import re
-from ssl import SSLContext
-import websockets
 import functools
+import re
+import websockets
 from http import HTTPStatus
-from websockets.datastructures import Headers
+from ssl import SSLContext
 from websockets.legacy.server import HTTPResponse
 from websockets.exceptions import ConnectionClosedError
 
+from jc.db import db
 from jc.server import message
 from jc.server.organization import Organization
+from jc.server.stream import Stream
 from jc.server.protocol import WebsocketProtocol
 from jc.server.user import User
 
 from typing import Any, Dict, Optional
+
+def _w(self, fn):
+  return functools.partial(fn, self)
 
 class Server:
   UPDATE_TIMEOUT = 5
@@ -21,93 +27,133 @@ class Server:
   def __init__(self, host: str, port: int, ssl: SSLContext = None):
     self.host = host
     self.port = port
+    self.ssl = ssl
     self.conn_event = asyncio.Event()
     self.orgs: Dict[str, Organization] = {}
-    self.ssl_ctx = ssl
+    self.streams: Dict[str, Stream] = {}
 
   def serve(self) -> Any:
-    def handle_req_wrapper(path, headers):
-      return Server.handle_request(self, path, headers)
     def handle_conn_wrapper(ws, path):
       return Server.handle_connection(self, ws, path)
     
+    protocol_factory = WebsocketProtocol.create_factory(
+      [
+        ('POST', '/org/{org_id}', _w(self, Server.handle_org_setup)),
+        ('PUT', '/org/{org_id}/streams/{stream_id}', _w(self, Server.handle_stream_setup)),
+        ('GET', '/stream/{stream_id}', None),
+        ('DELETE', '/stream/{stream_id}', _w(self, Server.handle_stream_teardown)),
+        ('*', '*', _w(self, Server.handle_unknown))
+      ],
+      _w(self, Server.handle_pre_connection)
+    )
+
+    asyncio.get_event_loop().run_until_complete(db.create_tables())
+
     print(f'starting server on port {self.port}')
     return websockets.serve(
       handle_conn_wrapper, 
       self.host, 
       self.port,
-      ssl=self.ssl_ctx, 
-      create_protocol=functools.partial(WebsocketProtocol, handle_req_wrapper)
+      ssl=self.ssl, 
+      create_protocol=protocol_factory
     )
 
-  async def publish(self, org: Organization, message: object):
-    if org is None:
+  async def publish(self, stream: Stream, message: object):
+    if stream is None:
       return
-    await asyncio.wait([user.send(message) for user in org.users])
+    await asyncio.wait([user.send(message) for user in stream.users])
 
   #
 
-  # handles all http requests
-  async def handle_request(self, path: str, _: Headers) -> Optional[HTTPResponse]:
-    org_id = Server._validate_path(path)
-    if org_id is None:
-      return (HTTPStatus(404), {}, bytes())
+  # default route
+  async def handle_unknown(self, _, __) -> HTTPResponse:
+    return (HTTPStatus(404), {}, bytes())
+
+  # POST /org/{org_id}
+  async def handle_org_setup(self, req: object, params: Dict[str, str]) -> HTTPResponse:
+    org_id = params['org_id']
+    if org_id in self.orgs:
+      return (HTTPStatus(304), {}, bytes())
     
-    if 'init' in path:
-      if org_id in self.orgs:
-        # org has already been initialized
-        print('org already setup')
-        return (HTTPStatus(304), {}, bytes())
-
-      try:
-        await self.do_org_setup(org_id)
-      finally:
-        pass
-      # except:
-      #   return (HTTPStatus(500), {}, bytes())
-      return (HTTPStatus(201), {}, bytes())
-    return None
-
-  # handles websocket connections
-  async def handle_connection(self, ws: WebsocketProtocol, path: str):
-    org_id = Server._validate_path(path)
-    if org_id is None:
-      ws.close(1002)
-      return
-
-    org = self.orgs[org_id]
-    try:
-      print(f'[org {org_id}] connection opened')
-      user = await self.do_user_setup(ws, org)
-      await user.send(message.emotes_message(org.emotes))
-      await user.listen()
-    except:
-      pass
-    finally:
-      print(f'[org {org_id}] connection closed')
-      if user is not None:
-        org.remove_user(user)
-
-  # performs organization set-up
-  async def do_org_setup(self, org_id: str):
     print(f'setting up org {org_id}')
     org = await Organization.create(org_id)
-    org.add_task(lambda org : self.update_viewer_count(org))
     self.orgs[org_id] = org
+    return (HTTPStatus(201), {}, bytes())
 
-    print(f'done org setup')
+  # PUT /org/{org_id}/streams/{stream_id}
+  async def handle_stream_setup(self, req: object, params: Dict[str, str]) -> HTTPResponse:
+    org_id = params['org_id']
+    stream_id = params['stream_id']
+    print(f'setting up stream {stream_id} ({org_id})')
+    if org_id in self.orgs:
+      org = self.orgs[org_id]
+    else:
+      print(f'setting up org {org_id}')
+      org = await Organization.create(org_id)
+      self.orgs[org_id] = org
+    
+    if stream_id in self.streams:
+      return (HTTPStatus(304), {}, bytes())
+    
+    print(f'setting up stream {stream_id}')
+    stream = await Stream.create(stream_id, org)
+    stream.add_task(_w(self, Server.update_viewer_count))
+    stream.add_task(_w(self, Server.close_deleted_stream))
+    
+    self.streams[stream_id] = stream
+    org.add_stream(stream)
+    return (HTTPStatus(201), {}, bytes())
+
+  # DELETE /stream/{stream_id}
+  async def handle_stream_teardown(self, req: object, params: Dict[str, str]) -> HTTPResponse:
+    stream_id = params['stream_id']
+    if stream_id not in self.streams:
+      return (HTTPStatus(404), {}, bytes())
+    
+    print(f'tearing down stream {stream_id}')
+    stream = self.streams[stream_id]
+    stream.deleted = True
+    return (HTTPStatus(200), {}, bytes())
+
+  # handle pre-websocket connections
+  async def handle_pre_connection(self, ws: WebsocketProtocol) -> HTTPResponse:
+    # print('pre connection')
+    stream_id = ws.params['stream_id']
+    if not stream_id or stream_id not in self.streams:
+      print('connection denied')
+      return (HTTPStatus(404), {}, bytes())
+    return None
+
+  # handle websocket connections
+  async def handle_connection(self, ws: WebsocketProtocol, path: str):
+    stream_id = ws.params['stream_id']  
+    stream = self.streams[stream_id]
+    try:
+      print(f'stream {stream_id} | connection opened')
+      stream.conn_event.set()
+      user = await self.do_user_setup(ws, stream)
+      await user.listen()
+    except Exception as e:
+      print(e)
+      pass
+    finally:
+      print(f'stream {stream_id} | connection closed')
+      if user is not None:
+        stream.remove_user(user)
+        stream.dis_event.set()
 
   # performs user set-up
-  async def do_user_setup(self, ws: WebsocketProtocol, org: Organization) -> User:
+  async def do_user_setup(self, ws: WebsocketProtocol, stream: Stream) -> User:
     # create an empty user so the client can receive chat and viewer
     # updates even if they haven't officially "joined" the cat
     try:
-      user = User(org, None, None, self, ws)
-      org.add_user(user)
-      org.event.set()
+      user = User(stream, None, None, self, ws)
+      stream.add_user(user)
+      stream.conn_event.set()
 
-      # send the viewer count
-      await user.send(message.viewers_message(len(org.users)))
+      # send the viewer count and emotes
+      await user.send(message.viewers_message(len(stream.users)))
+      await user.send(message.emotes_message(stream.org.emotes))
 
       # after connecting the first message from the client should
       # be a 'setup' message containing information about the user
@@ -120,29 +166,33 @@ class Server:
           user.email = setup['email']
           print('user joined chat')
           break
-      org.log_status(f'{setup["name"]} joined the chat')  
+      stream.log_status(f'{setup["name"]} joined the chat')  
       return user
     except ConnectionClosedError:
       if user.name:
-        org.log_status(f'{user.name} left the chat')
-      org.remove_user(user)
+        stream.log_status(f'{user.name} left the chat')
+      stream.remove_user(user)
+      stream.dis_event.set()
+
+  # tasks
 
   # updates the viewer count at a fixed rate
-  async def update_viewer_count(self, org: Organization):
-    print(f'[org {org.id}] starting update_viewer_count task')
+  async def update_viewer_count(self, stream: Stream):
+    print(f'[stream {stream.id}] starting update_viewer_count task')
     while True:
-      if len(org.users) == 0:
-        await org.event.wait()
-        org.event.clear()
-      await asyncio.sleep(self.UPDATE_TIMEOUT)
-      await self.publish(message.viewers_message(len(self.users)))
+        if len(stream.users) == 0:
+          await stream.conn_event.wait()
+          stream.conn_event.clear()
+        await asyncio.sleep(self.UPDATE_TIMEOUT)
+        await self.publish(stream, message.viewers_message(len(stream.users)))
   
-  #
-
-  @staticmethod
-  def _validate_path(path: str) -> Optional[str]:
-    if not path or path == '/':
-      return None
-    if re.match(r'^\/\d+(\/(init\/?)?)?$', path):
-      return path.replace('/', '').replace('init', '')
-    return None
+  # closes "deleted" streams when all users disconnect
+  async def close_deleted_stream(self, stream: Stream):
+    print(f'[stream {stream.id}] starting close_deleted_stream task')
+    while True:
+      await stream.dis_event.wait()
+      stream.dis_event.clear()
+      if len(stream.users) == 0 and stream.deleted:
+        print('closing stream')
+        stream.org.remove_stream(stream)
+        await stream.close()

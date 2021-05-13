@@ -6,8 +6,8 @@ from typing import Any
 from websockets.legacy.protocol import WebSocketCommonProtocol
 
 class User:
-  def __init__(self, org: Any, name: str, email: str, server: Any, conn: WebSocketCommonProtocol):
-    self.org = org
+  def __init__(self, stream: Any, name: str, email: str, server: Any, conn: WebSocketCommonProtocol):
+    self.stream = stream
     self.name = name
     self.email = email
     self.server = server
@@ -22,8 +22,8 @@ class User:
       try:
         obj = message.parse_message(msg)
         if obj['type'] == MessageType.TEXT:
-          self.org.log_message(self, obj['text'])
-          await self.server.publish(self.org, message.text_message(self.name, obj['text']))
+          self.stream.log_message(self, obj['text'])
+          await self.server.publish(self.stream, message.text_message(self.name, obj['text']))
       except InvalidMessageError:
         pass
 

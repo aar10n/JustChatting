@@ -43,6 +43,7 @@ class FileLogger(LoggerProtocol):
     self = FileLogger(id)
 
     logs_dir = os.getenv('LOGS_DIR', './')
+    os.makedirs(logs_dir, exist_ok=True)
     path = os.path.join(logs_dir, self.name + '.log');
     self.file = await aiofiles.open(path, 'w')
     return self
@@ -53,41 +54,6 @@ class FileLogger(LoggerProtocol):
 
   async def log(self, strings: List[str]):
     await self.file.writelines([f'{line}\n' for line in strings])
-
-class MysqlLogger(LoggerProtocol):
-  @staticmethod
-  async def create(id: str):
-    self = MysqlLogger(id)
-    await self._connect_mysql()
-    return self
-
-  async def _connect_mysql(self):
-    host = os.getenv('MYSQL_HOST', 'localhost')
-    port = int(os.getenv('MYSQL_PORT', 3306))
-    user = os.getenv('MYSQL_USER')
-    password = os.getenv('MYSQL_PASS')
-
-    try:
-      conn = await aiomysql.connect(
-        host=host, port=port, 
-        user=user, password=password, 
-        db='jc'
-      )
-      self.db = conn
-      self.cur = await conn.cursor()
-    except:
-      self.db = None
-      self.cur = None
-
-  async def close(self):
-    if self.db is None:
-      return
-    await self.cur.close()
-    self.conn.close()
-
-  async def log(self, _: List[str]):
-    # print(f'[not implemented] {strings}')
-    pass
 
 #
 
@@ -108,7 +74,6 @@ class Logger:
     results = await asyncio.wait([
       StdoutLogger.create(org_id),
       FileLogger.create(org_id),
-      MysqlLogger.create(org_id),
     ])
     self.loggers = [res.result() for res in results[0]]
     self.queue = []
