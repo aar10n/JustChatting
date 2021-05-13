@@ -5,5 +5,5 @@ setup(
   version='1.0',
   description='A live-chat server',
   author='Aaron Gill-Braun',
-  packages=['jc', 'jc.server'],
+  packages=['jc', 'jc.server', 'jc.db'],
 )
