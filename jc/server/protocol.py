@@ -42,7 +42,7 @@ async def read_request(stream: asyncio.StreamReader) -> Tuple[str, Headers]:
     except Exception as exc:
       raise exc
   
-  return method.decode("utf-8"), path, headers, body
+  return method.decode("utf-8"), path.rstrip('/'), headers, body
 
 
 class NoMatchError(Exception):

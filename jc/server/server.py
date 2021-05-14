@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import re
+
+from jc.db.emotes import BTTV_EMOTES
+import json
 import websockets
 from http import HTTPStatus
 from ssl import SSLContext
@@ -16,7 +18,7 @@ from jc.server.stream import Stream
 from jc.server.protocol import WebsocketProtocol
 from jc.server.user import User
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 def _w(self, fn):
   return functools.partial(fn, self)
@@ -37,8 +39,10 @@ class Server:
       return Server.handle_connection(self, ws, path)
     
     protocol_factory = WebsocketProtocol.create_factory(
-      [
+      [ 
         ('POST', '/org/{org_id}', _w(self, Server.handle_org_setup)),
+        ('DELETE', '/org/{org_id}', _w(self, Server.handle_org_teardown)),
+        ('PUT', '/org/{org_id}/emotes', _w(self, Server.handle_update_emotes)),
         ('PUT', '/org/{org_id}/streams/{stream_id}', _w(self, Server.handle_stream_setup)),
         ('GET', '/stream/{stream_id}', None),
         ('DELETE', '/stream/{stream_id}', _w(self, Server.handle_stream_teardown)),
@@ -80,11 +84,64 @@ class Server:
     self.orgs[org_id] = org
     return (HTTPStatus(201), {}, bytes())
 
+  # DELETE /org/{org_id}
+  async def handle_org_teardown(self, req: object, params: Dict[str, str]) -> HTTPResponse:
+    org_id = params['org_id']
+    if org_id not in self.orgs:
+      return (HTTPStatus(404), {}, bytes())
+
+    org = self.orgs[org_id]
+    print(f'tearing down org {org_id}')
+    await org.close()
+    await db.delete_emotes(org_id)
+    return (HTTPStatus(200), {}, bytes())
+    
+  # PUT /org/{org_id}/emotes
+  async def handle_update_emotes(self, req: object, params: Dict[str, str]) -> HTTPResponse:
+    org_id = params['org_id']
+    if org_id not in self.orgs:
+      return (HTTPStatus(404), {}, bytes())
+    org = self.orgs[org_id]
+
+    new_emotes = []
+    try:
+      obj = json.loads(req['body'])
+      if isinstance(obj, list):
+        for o in obj:
+          if 'name' not in o or not isinstance(o['name'], str):
+            raise Exception()
+          elif 'url' not in o or not isinstance(o['url'], str):
+            raise Exception()
+          new_emotes += [(o['name'], o['url'])]
+      elif isinstance(obj, object):
+        if not 'default_set' in obj:
+          raise Exception()
+        if obj['default_set'] == 'bttv':
+            new_emotes = BTTV_EMOTES
+        else:
+          raise Exception()
+      else:
+        raise Exception()
+    except:
+      return (HTTPStatus(400), {}, bytes())
+    
+    try:
+      if len(new_emotes) == 0:
+        return (HTTPStatus(204), {}, bytes())
+
+      emotes = await db.save_emotes(org_id, new_emotes)
+      org.emotes = emotes
+
+      msg = message.emotes_message(emotes)
+      await asyncio.wait([self.publish(s, msg) for s in org.streams])
+    except:
+      return (HTTPStatus(500), {}, bytes())
+    return (HTTPStatus(200), {}, bytes())
+
   # PUT /org/{org_id}/streams/{stream_id}
   async def handle_stream_setup(self, req: object, params: Dict[str, str]) -> HTTPResponse:
     org_id = params['org_id']
     stream_id = params['stream_id']
-    print(f'setting up stream {stream_id} ({org_id})')
     if org_id in self.orgs:
       org = self.orgs[org_id]
     else:

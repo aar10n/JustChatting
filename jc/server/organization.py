@@ -1,5 +1,6 @@
 import asyncio
-
+from jc.db import db
+from jc.db.emotes import BTTV_EMOTES
 from typing import List, Set, Tuple
 
 class Organization:
@@ -12,12 +13,11 @@ class Organization:
   async def create(id: str):
     self = Organization()
     self.id = id
-    self.emotes = []
+    self.emotes = await db.get_emotes(id)
     self.streams = set()
     return self
 
   async def close(self):
-    print('tearing down org')
     await asyncio.wait([stream.close() for stream in self.streams])
 
   def add_stream(self, stream):
