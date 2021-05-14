@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from jc.server import message
 from jc.server.message import InvalidMessageError, MessageType
 
@@ -22,8 +23,10 @@ class User:
       try:
         obj = message.parse_message(msg)
         if obj['type'] == MessageType.TEXT:
+          today = datetime.utcnow()
+          t_str = today.strftime('%Y-%m-%d %H:%M:%S')
           self.stream.log_message(self, obj['text'])
-          await self.server.publish(self.stream, message.text_message(self.name, obj['text']))
+          await self.server.publish(self.stream, message.text_message(self.name, t_str, obj['text']))
       except InvalidMessageError:
         pass
 

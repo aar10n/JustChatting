@@ -22,6 +22,7 @@ server -> client
 {
   type: 'text',
   user: str,
+  time: str,
   text: str,
 }
 
@@ -110,10 +111,11 @@ def expect_message(msg: str, type: str) -> object:
 
 #
 
-def text_message(user: str, text: str) -> object:
+def text_message(user: str, time: str, text: str) -> object:
   obj = {
     'type': MessageType.TEXT,
     'user': user,
+    'time': time,
     'text': text
   }
   return obj

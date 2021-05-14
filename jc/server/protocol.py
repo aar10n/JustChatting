@@ -41,7 +41,7 @@ async def read_request(stream: asyncio.StreamReader) -> Tuple[str, Headers]:
       raise EOFError('connection closed while reading HTTP headers') from exc
     except Exception as exc:
       raise exc
-  
+
   return method.decode("utf-8"), path.rstrip('/'), headers, body
 
 
@@ -104,10 +104,6 @@ class WebsocketProtocol(WebSocketServerProtocol):
     return None
 
   def handle_options_request(self, path, headers, body) -> HTTPResponse:
-    # print('OPTIONS request')
-    # print(path, headers)
-    # print(body)
-
     resp_headers = {
       'Access-Control-Allow-Methods': ', '.join(self.allowed_methods),
       'Access-Control-Allow-Origin': '*',

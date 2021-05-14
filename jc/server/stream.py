@@ -33,11 +33,9 @@ class Stream:
 
   async def close(self):
     print('closing stream')
-    await asyncio.wait(
-      [self.logger.close()] + 
-      [task.cancel() for task in self.tasks] +
-      [user.conn.close() for user in self.users]
-    )
+    await self.logger.close()
+    await asyncio.wait([task.cancel() for task in self.tasks])
+    await asyncio.wait([user.conn.close() for user in self.users])
 
   def add_task(self, fn: Callable) -> Task:
     task = asyncio.get_event_loop().create_task(fn(self))

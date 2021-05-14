@@ -105,7 +105,9 @@ class Server:
 
     new_emotes = []
     try:
-      obj = json.loads(req['body'])
+      print(req['body'])
+      obj = json.loads(req['body'].decode('utf-8'))
+      print(obj)
       if isinstance(obj, list):
         for o in obj:
           if 'name' not in o or not isinstance(o['name'], str):
@@ -122,7 +124,8 @@ class Server:
           raise Exception()
       else:
         raise Exception()
-    except:
+    except Exception as e:
+      print(e)
       return (HTTPStatus(400), {}, bytes())
     
     try:
