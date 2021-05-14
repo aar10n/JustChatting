@@ -134,8 +134,9 @@ class Server:
       org.emotes = emotes
 
       msg = message.emotes_message(emotes)
-      await asyncio.wait([self.publish(s, msg) for s in org.streams])
-    except:
+      if len(org.streams) > 0:
+        await asyncio.wait([self.publish(s, msg) for s in org.streams])
+    except Exception:
       return (HTTPStatus(500), {}, bytes())
     return (HTTPStatus(200), {}, bytes())
 
