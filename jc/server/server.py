@@ -9,7 +9,7 @@ import websockets
 from http import HTTPStatus
 from ssl import SSLContext
 from websockets.legacy.server import HTTPResponse
-from websockets.exceptions import ConnectionClosedError
+from websockets.exceptions import ConnectionClosed
 
 from jc.db import db
 from jc.server import message
@@ -105,9 +105,7 @@ class Server:
 
     new_emotes = []
     try:
-      print(req['body'])
       obj = json.loads(req['body'].decode('utf-8'))
-      print(obj)
       if isinstance(obj, list):
         for o in obj:
           if 'name' not in o or not isinstance(o['name'], str):
@@ -188,17 +186,23 @@ class Server:
   async def handle_connection(self, ws: WebsocketProtocol, path: str):
     stream_id = ws.params['stream_id']  
     stream = self.streams[stream_id]
+    user = None
     try:
       print(f'stream {stream_id} | connection opened')
       stream.conn_event.set()
       user = await self.do_user_setup(ws, stream)
+      stream.log_status(f'{user.name} joined the chat')
       await user.listen()
+    except ConnectionClosed:
+      pass
     except Exception as e:
       print(e)
       pass
     finally:
       print(f'stream {stream_id} | connection closed')
-      if user is not None:
+      if user:
+        if user.name:
+          stream.log_status(f'{user.name} left the chat')
         stream.remove_user(user)
         stream.dis_event.set()
 
@@ -219,20 +223,18 @@ class Server:
       # be a 'setup' message containing information about the user
       # connecting. Keep reading messages until a setup message is
       # received.
-      async for msg in ws:
+      while True:
+        msg = await ws.recv()
         setup = message.parse_message(msg)
         if setup['type'] == 'setup':
           user.name = setup['name']
           user.email = setup['email']
-          print('user joined chat')
           break
-      stream.log_status(f'{setup["name"]} joined the chat')  
       return user
-    except ConnectionClosedError:
-      if user.name:
-        stream.log_status(f'{user.name} left the chat')
+    except ConnectionClosed as e:
       stream.remove_user(user)
       stream.dis_event.set()
+      raise e
 
   # tasks
 

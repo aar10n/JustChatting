@@ -1,6 +1,5 @@
 import asyncio
 from jc.db import db
-from jc.db.emotes import BTTV_EMOTES
 from typing import List, Set, Tuple
 
 class Organization:

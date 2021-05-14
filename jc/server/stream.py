@@ -19,7 +19,6 @@ class Stream:
 
   @staticmethod
   async def create(id: str, org: Organization):
-    print('creating stream')
     self = Stream()
     self.id = id
     self.org = org
@@ -32,10 +31,15 @@ class Stream:
     return self
 
   async def close(self):
-    print('closing stream')
-    await self.logger.close()
-    await asyncio.wait([task.cancel() for task in self.tasks])
+    for task in self.tasks:
+      task.cancel()
+    for task in self.tasks:
+      try:
+        await task
+      except asyncio.CancelledError:
+        pass
     await asyncio.wait([user.conn.close() for user in self.users])
+    await self.logger.close()
 
   def add_task(self, fn: Callable) -> Task:
     task = asyncio.get_event_loop().create_task(fn(self))

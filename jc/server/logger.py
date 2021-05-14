@@ -85,11 +85,12 @@ class Logger:
     return self
   
   async def close(self):
-    print('closing logger')
-    await asyncio.wait(
-      [self.task.cancel()] + 
-      [logger.close() for logger in self.loggers]
-    )
+    self.task.cancel()
+    try:
+      await self.task
+    except asyncio.CancelledError:
+      pass
+    await asyncio.wait([logger.close() for logger in self.loggers])
 
   # batch writes
   async def _writer_task(self):
